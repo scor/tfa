@@ -43,11 +43,6 @@ function tfa_entry_access($account, $url_hash) {
  */
 function tfa_perm() {
   return array(
-    // Require TFA process.
-    // Require two-factor to authenticate. Note: users without TFA setup will be
-    // unable to log in.
-    'require tfa',
-
     // Administer TFA.
     // Configure two-factor authentication settings.
     'admin tfa settings',
@@ -300,7 +295,7 @@ function tfa_user_login_form_validate_authenticate($form, &$form_state) {
     'status' => 1,
   ));
 
-  if ($account && !user_access('require tfa', $account)) {
+  if ($account && user_access('bypass tfa setup', $account)) {
     // Normal login process.
     user_login_authenticate_validate($form, $form_state);
     user_login_final_validate($form, $form_state);
@@ -329,7 +324,7 @@ function tfa_user_login_form_submit($form, &$form_state) {
     user_load(array('name' => $form_state['values']['name']))
   );
 
-  if (!user_access('require tfa', $account)) {
+  if (user_access('bypass tfa setup', $account)) {
     // Normal login process.
     user_login_submit($form, $form_state);
 
@@ -339,11 +334,18 @@ function tfa_user_login_form_submit($form, &$form_state) {
   // Similar to tfa_user_login() but not required to force user logout.
   $tfa = tfa_get_process($account);
 
-  if (user_access('require tfa', $account) && !tfa_login_complete($account) && !$tfa->ready()) {
-    drupal_set_message(t('Login disallowed. You are required to setup two-factor authentication. Please contact a site administrator.'), 'error');
-    $form_state['redirect'] = 'user';
+  // Check if user has gone through TFA process.
+  $tfa_complete = tfa_login_complete($account);
+
+  // Allow other modules to act on login when account is not set up for TFA.
+  if (!$tfa_complete && !$tfa->ready()) {
+    $require_tfa = array_filter(module_invoke_all('tfa_require', $account));
+    if (!empty($require_tfa)) {
+      $form_state['redirect'] = !empty($form_state['redirect']) ? $form_state['redirect'] : 'user';
+      return;
+    }
   }
-  elseif (!tfa_login_complete($account) && $tfa->ready() && !tfa_login_allowed($account)) {
+  if (!$tfa_complete && $tfa->ready() && !tfa_login_allowed($account)) {
     // Restart flood levels, session context, and TFA process.
     $identifier = variable_get('user_failed_login_identifier_uid_only', FALSE) ? $account->uid : $account->uid . '-' . ip_address();
     tfa_flood_clear_event('tfa_user', $identifier);
@@ -392,7 +394,7 @@ function tfa_user_login_form_submit_redirect($form, &$form_state) {
       user_load(array('name' => $form_state['values']['name']))
     );
 
-    if (user_access('require tfa', $account)) {
+    if (!user_access('bypass tfa setup', $account)) {
       $form_state['redirect'] = $form_state['tfa_redirect'];
     }
   }
@@ -442,13 +444,18 @@ function tfa_user($op, &$edit, &$account, $category = NULL) {
 
       $tfa = tfa_get_process($account);
 
-      if (user_access('require tfa', $account) && !tfa_login_complete($account) && !$tfa->ready()) {
-        tfa_logout();
-        drupal_set_message(t('Login disallowed. You are required to setup two-factor authentication. Please contact a site administrator.'), 'error');
-        drupal_goto('user');
-      }
+      // Check if user has gone through TFA process.
+      $tfa_complete = tfa_login_complete($account);
 
-      if (!tfa_login_complete($account) && $tfa->ready() && !tfa_login_allowed($account)) {
+      // Allow other modules to act on login when account is not set up for TFA.
+      if (!$tfa_complete && !$tfa->ready()) {
+        $require_tfa = array_filter(module_invoke_all('tfa_require', $account));
+        if (!empty($require_tfa)) {
+          tfa_logout();
+          drupal_goto('user');
+        }
+      }
+      if (!$tfa_complete && $tfa->ready() && !tfa_login_allowed($account)) {
         // Save the original $account object because the tfa_logout() has affect
         // on $account.
         $account_to_login = clone $account;

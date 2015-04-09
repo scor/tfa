@@ -273,32 +273,6 @@ class TfaTestCase extends DrupalWebTestCase {
     $this->assertNoFieldById('edit-code', '', 'The send code input does not appear');
   }
 
-  public function testReadyAndRequired() {
-    variable_set('tfa_validate_plugin', 'tfa_test_send');
-
-    // Disable ready.
-    variable_set('tfa_test_is_ready', FALSE);
-
-    $edit = array(
-      'name' => $this->webUserSimple->name,
-      'pass' => $this->webUserSimple->pass_raw,
-    );
-    $this->drupalPost('user/login', $edit, 'Log in');
-    $this->assertLink('Log out', 0, 'Authenticated');
-
-    $this->drupalLogout();
-
-    // Swap plugin.
-    variable_set('tfa_validate_plugin', 'tfa_test_totp');
-    $edit = array(
-      'name' => $this->webUserTfa->name,
-      'pass' => $this->webUserTfa->pass_raw,
-    );
-    $this->drupalPost('user/login', $edit, 'Log in');
-    $this->assertNoLink('Log out', 'Not authenticated');
-    $this->assertText($this->uiStrings('required'), 'Required text shows');
-  }
-
   /**
    * Test tfa_context_alter.
    */
@@ -403,9 +377,6 @@ class TfaTestCase extends DrupalWebTestCase {
 
       case 'flood-begin':
         return 'You have reached the threshold for TFA attempts.';
-
-      case 'required':
-        return 'Login disallowed. You are required to setup two-factor authentication. Please contact a site administrator.';
     }
 
     return NULL;
